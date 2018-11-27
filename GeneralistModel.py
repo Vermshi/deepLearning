@@ -8,7 +8,7 @@ class GeneralistModel(nn.Module):
 
         self.gru = nn.GRU(inputSize, nHidden)
         self.out = nn.Linear(nHidden, inputSize)
-        self.outFunction = nn.Softmax()
+        self.outFunction = nn.Sigmoid()
 
     def forward(self, input, hidden):
         output, hidden = self.gru(input, hidden)
