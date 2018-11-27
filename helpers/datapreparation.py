@@ -161,13 +161,27 @@ def embed_play_v1(piano_roll_matrix,fs=5):
 
 def generate_round(model,tag,n,k=1,init=None):
     if(init is None):
-        init = torch.zeros(size=(k,1,model.input_size)).cuda()
+        init = torch.zeros(size=(k,1,model.inputSize))
     else:
         k = init.shape[0]
     res = init
     hidden = None
     for i in range(n//k):
         init,hidden = model.forward(init,tag,hidden)
+        #init = torch.round(torch.exp(init))
+        init = torch.round(init/torch.max(init))
+        res = torch.cat ( ( res, init ) )
+    return res
+
+def generate_round_generalist(model,tag,n,k=1,init=None):
+    if(init is None):
+        init = torch.zeros(size=(k,1,model.inputSize))
+    else:
+        k = init.shape[0]
+    res = init
+    hidden = model.initHidden()
+    for i in range(n//k):
+        init,hidden = model.forward(init,hidden)
         #init = torch.round(torch.exp(init))
         init = torch.round(init/torch.max(init))
         res = torch.cat ( ( res, init ) )
@@ -185,19 +199,25 @@ def generate_smooth(model,tag,n,init):
         init = torch.cat( (init[1:], init_new) )
     return res
 
-def gen_music(model,length=1000,init=None,composer=0,fs=5):
-    if(init is None):
-        song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1).cuda(),length,1)
+def gen_music(model,length=1000,init=None,composer=0,fs=5,generalist=False):
+    if generalist == False:
+        if(init is None):
+            song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1),length,1)
+        else:
+            song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1),length,1,init)
     else:
-        song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1).cuda(),length,1,init)
+        if (init is None):
+            song = generate_round_generalist(model, torch.LongTensor([composer]).unsqueeze(1), length, 1)
+        else:
+            song = generate_round_generalist(model, torch.LongTensor([composer]).unsqueeze(1), length, 1, init)
     res = ( song.squeeze(1).detach().cpu().numpy()).astype(int).T
     visualize_piano_roll(res,fs)
     return embed_play_v1(res,fs)
 
 def gen_music_initkeys(model,length=1000,initkeys=40,composer=0,fs=5):
-    init = torch.zeros(size=(1,1,model.input_size)).cuda()
+    init = torch.zeros(size=(1,1,model.inputSize))
     init[0,0,initkeys]=1
-    song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1).cuda(),length,1,init)
+    song=generate_round(model, torch.LongTensor([composer]).unsqueeze(1),length,1,init)
     res = ( song.squeeze(1).detach().cpu().numpy()).astype(int).T
     visualize_piano_roll(res,fs)
     return embed_play_v1(res,fs)

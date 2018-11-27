@@ -1,9 +1,8 @@
 import matplotlib.pyplot as plt
 from helpers.dataset import *
-import torch.nn as nn
-from GeneralistModel import *
 from Specialist import *
 import torch
+from helpers.datapreparation import *
 from torch.autograd import Variable
 
 def evaluate(inder, tag, targets):
@@ -17,13 +16,15 @@ def evaluate(inder, tag, targets):
     if(guessedArtist == tag):
         totalStats[2]+=1
 
-    #Embedding end-------------------------------------------------------
+    # Evaluation code--------------------------------------------------------
+    binOutputs = []
     for i in range(inder.shape[0]):
         singleTarget = targets[i]
         singleOutput = outputs[i]
         # print("out")
         nTangents = getNumberOfTangents(singleTarget)
         binout = binarizeOutput(singleOutput,nTangents)
+        binOutputs.append(binout)
         whatIsOutput = []
         for i in range(singleTarget.shape[1]):
             if(singleTarget[0][i] == 1):
@@ -34,6 +35,9 @@ def evaluate(inder, tag, targets):
         totalStats[0]+=whatIsOutput.count(1)
         totalStats[1]+=nTangents
 
+    #Vizulization code-------------------------------------------------------
+    # binOutputs = np.array(binOutputs).transpose()
+    # visualize_piano_roll(binOutputs,fs=fs)
 
     return totalStats
 
@@ -44,6 +48,34 @@ def getNumberOfTangents(singleTarg):
             numberOfTan+=1
     return numberOfTan
 
+def composeMusic(inder,timeSteps):
+    hidden = rnn.initHidden()
+    randomTag = torch.tensor([[0]])
+    binOutputs = []
+    nTangents = 5
+    for line in inder:
+        output, hidden = rnn(line.view(1,1,line.shape[1]), randomTag, hidden)
+        binout = binarizeOutput(output[0], nTangents)
+        binOutputs.append(binout)
+
+    binout = binarizeOutput(output[0], nTangents)
+    binOutputs.append(binout)
+    tensorBinout = torch.tensor(binout).view(1,1, -1).float()
+    output = tensorBinout
+
+    for i in range(timeSteps):
+        # print("out")
+        output, hidden = rnn(output, randomTag, hidden)
+
+        binout = binarizeOutput(output[0], nTangents)
+        binOutputs.append(binout)
+        tensorBinout = torch.tensor(binout).view(1,1,-1).float()
+        output = tensorBinout
+
+    # Vizulization code-------------------------------------------------------
+    binOutputs = np.array(binOutputs).transpose()
+    visualize_piano_roll(binOutputs,fs=fs)
+
 def getClosestIndex(numTags,hidden,nHidden):
     distances = []
     embed = nn.Embedding(numTags, nHidden)
@@ -53,27 +85,7 @@ def getClosestIndex(numTags,hidden,nHidden):
     closestIndex = distances.index(min(distances))
     return torch.tensor([[closestIndex]])
 
-# def train(target, input):
-#     hidden = rnn.initHidden()
-#
-#     rnn.zero_grad()
-#     outputs = []
-#     errors = []
-#     for i in range(input.shape[0]):
-#         singleInput = input[i].view(1, 1, -1)
-#         output, hidden = rnn(singleInput, hidden)
-#         singleTarget = target[i].view( 1, -1)
-#
-#         loss = lossFunction(output, singleTarget)
-#         loss.backward(retain_graph=True)
-#
-#         # Add parameters' gradients to their values, multiplied by learning rate
-#         for p in rnn.parameters():
-#             p.data.add_(-learningRate, p.grad.data)
-#         errors.append(loss.item())
-#         outputs.append(output)
-#
-#     return outputs, np.sum(errors)/len(errors)
+
 
 
 def binarizeOutput(output,nTangs):
@@ -83,26 +95,30 @@ def binarizeOutput(output,nTangs):
     outputBinary = [0]*output.shape[1]
     for i in range(nTangs):
         outputBinary[sortedIndexes[0][i]] = 1
-
-
     return outputBinary
 
 
 if __name__ == '__main__':
     # Get a dataset by sending in index to getitem:
-    dataobj = pianoroll_dataset_chunks("datasets/training/piano_roll_fs5")
+    fs = 1
+    temperature = 5
+    dataobj = pianoroll_dataset_chunks("datasets/training/piano_roll_fs"+str(fs))
     dataobj.gen_batch()
     input, tag, target = dataobj.__getitem__(0)
+    # ----------------------------------------------- Play code
+    pianorollMatrix = input.view(input.shape[2],input.shape[0]).numpy()
+    v = embed_play_v1(pianorollMatrix,fs=fs)
+    # ---------------------------------- End
     numTags = dataobj.num_tags()
     inputSize = input.shape[2]
     nGRUS = input.shape[0]
     nHidden = 256
     learningRate = 0.01
-    epochs = 1
-    miniBatchSize = 100
-
+    epochs = 100
+    miniBatchSize = 3
+    #Used because categorical cross entropy doesnt work
     lossFunction = torch.nn.BCELoss()
-    rnn = Specialist(inputSize,nHidden,numTags)
+    rnn = Specialist(inputSize,nHidden,numTags,temperature)
     optimizer = torch.optim.Adam(rnn.parameters(), lr=learningRate)
 
     outputs = []
@@ -110,7 +126,7 @@ if __name__ == '__main__':
 
     for i in range(epochs):
         for k in range(miniBatchSize):
-            print("Blasting bach through the system: ", (k + 1)*(i+1), "/", miniBatchSize*epochs)
+            print("Blasting bach through the system: ", (k + 1)+(i*miniBatchSize), "/", miniBatchSize*epochs)
             hidden = None
             optimizer.zero_grad()
             input, tag, target = dataobj.__getitem__(k)
@@ -134,5 +150,7 @@ if __name__ == '__main__':
             totalStats[2]+=stats[2]
             totalStats[3]+=stats[3]
 
-    print("The network got", totalStats[0], " / ", totalStats[1], "correct.")
+    print("The network got", totalStats[0], " / ", totalStats[1], "tangents hit correctly.")
     print("The networked guessed the right composer", totalStats[2], " of ", totalStats[3], " times.")
+    composeMusic(input[:5],50)
+    gen_music(rnn,length=50,fs=fs)
